@@ -2,7 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {IEulerSwap} from "../interfaces/IEulerSwap.sol";
-import {FHE, euint128, ebool} from "@fhenixprotocol/cofhe-contracts/FHE.sol";
 
 library CtxLib {
     struct State {
@@ -12,54 +11,13 @@ library CtxLib {
         mapping(address manager => bool installed) managers;
     }
 
-    // ============ FHE Encrypted State ============
-
-    struct FHEState {
-        euint128 eReserve0;
-        euint128 eReserve1;
-        bool initialized;
-    }
-
     // keccak256("eulerSwap.state") - 1
     bytes32 internal constant CtxStateLocation = 0x10ee9b31f73104ff2cf413742414a498e1f7b56c11cb512bca58a9c50727bb58;
-
-    // keccak256("eulerSwap.fheState") - 1
-    bytes32 internal constant CtxFHEStateLocation = 0x6eed82785a25beb4f59fd7b7ffea3e3dfe22af76cae82d63bc1fdf36f319f302;
 
     function getState() internal pure returns (State storage s) {
         assembly {
             s.slot := CtxStateLocation
         }
-    }
-
-    function getFHEState() internal pure returns (FHEState storage s) {
-        assembly {
-            s.slot := CtxFHEStateLocation
-        }
-    }
-
-    /// @notice Initialize FHE state from plaintext reserves
-    function initializeFHEState(uint112 reserve0, uint112 reserve1) internal {
-        FHEState storage fs = getFHEState();
-        require(!fs.initialized, "FHE state already initialized");
-
-        fs.eReserve0 = FHE.asEuint128(reserve0);
-        fs.eReserve1 = FHE.asEuint128(reserve1);
-        fs.initialized = true;
-
-        FHE.allowThis(fs.eReserve0);
-        FHE.allowThis(fs.eReserve1);
-    }
-
-    /// @notice Update FHE reserves after a swap
-    function updateFHEReserves(euint128 newReserve0, euint128 newReserve1) internal {
-        FHEState storage fs = getFHEState();
-
-        fs.eReserve0 = newReserve0;
-        fs.eReserve1 = newReserve1;
-
-        FHE.allowThis(fs.eReserve0);
-        FHE.allowThis(fs.eReserve1);
     }
 
     // keccak256("eulerSwap.dynamicParams") - 1
