@@ -1,0 +1,3 @@
+[submodule "zorbital-core/lib/forge-std"]
+	path = zorbital-core/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
