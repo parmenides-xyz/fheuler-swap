@@ -232,8 +232,6 @@ contract ZorbitalPoolTest is Test {
     }
 
     // ============ Cross-Tick Swap Tests ============
-    // Adapted from Uniswap V3 tutorial for Orbital's nested tick model
-
     /// @notice Test: Two identical ticks (same boundary k)
     /// In Orbital, multiple LPs can provide liquidity at the same tick.
     /// Their radii add up, providing deeper liquidity (like overlapping ranges in Uniswap V3).
