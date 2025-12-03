@@ -8,6 +8,7 @@ import "./libraries/OrbitalMath.sol";
 import "./interfaces/IERC20.sol";
 import "./interfaces/IZorbitalMintCallback.sol";
 import "./interfaces/IZorbitalSwapCallback.sol";
+import "./interfaces/IZorbitalFlashCallback.sol";
 
 contract ZorbitalPool {
     using Tick for mapping(int24 => Tick.Info);
@@ -29,6 +30,8 @@ contract ZorbitalPool {
         uint256 sumReserves;
         // Current tick
         int24 tick;
+        // Current consolidated radius (analogous to liquidity L)
+        uint128 r;
     }
 
     /// @notice Maintains state for one iteration of order filling
@@ -38,6 +41,8 @@ contract ZorbitalPool {
         uint256 sumReservesStart;
         // Next initialized tick (boundary to potentially cross)
         int24 nextTick;
+        // Whether the next tick is initialized
+        bool initialized;
         // Sum of reserves at next tick boundary
         uint256 sumReservesNext;
         // Amount of input tokens consumed in this step
@@ -102,6 +107,11 @@ contract ZorbitalPool {
         if (tick < MIN_TICK || tick > MAX_TICK) revert InvalidTickRange();
         if (amount == 0) revert ZeroRadius();
 
+        Slot0 memory slot0_ = slot0;
+
+        // Determine if this tick is interior (current α inside boundary)
+        bool isInterior = slot0_.tick < tick;
+
         // In Orbital, positions have only ONE tick (not lowerTick/upperTick)
         // since ticks are nested and all share the equal-price point as center
         bool flipped = ticks.update(tick, amount);
@@ -113,11 +123,10 @@ contract ZorbitalPool {
         Position.Info storage position = positions.get(owner, tick);
         position.update(amount);
 
-        Slot0 memory slot0_ = slot0;
         amounts = new uint256[](tokens.length);
         uint256 amountPerToken = OrbitalMath.calcAmountPerToken(amount, tokens.length);
 
-        if (slot0_.tick < tick) {
+        if (isInterior) {
             // Position is active (current α inside boundary)
             for (uint256 i = 0; i < tokens.length; i++) {
                 amounts[i] = amountPerToken;
@@ -162,16 +171,21 @@ contract ZorbitalPool {
         int24 tick
     );
 
+    error NotEnoughLiquidity();
+    error InvalidSumReservesLimit();
+
     function swap(
         address recipient,
         uint256 tokenInIndex,
         uint256 tokenOutIndex,
         uint256 amountSpecified,
+        uint128 sumReservesLimit,
         bytes calldata data
     ) public returns (int256 amountIn, int256 amountOut) {
         require(amountSpecified > 0, "Amount must be positive");
 
         Slot0 memory slot0_ = slot0;
+        uint128 r_ = r;
 
         // Compute current reserves from actual balances
         uint256[] memory balances = new uint256[](tokens.length);
@@ -188,7 +202,8 @@ contract ZorbitalPool {
             amountSpecifiedRemaining: amountSpecified,
             amountCalculated: 0,
             sumReserves: sumReserves_,
-            tick: slot0_.tick
+            tick: slot0_.tick,
+            r: r_
         });
 
         // Determine swap direction based on whether S will increase or decrease
@@ -198,28 +213,53 @@ contract ZorbitalPool {
         // For simplicity, assume swaps that increase S search higher ticks
         bool lte = false; // Will be determined by price movement
 
+        // Validate sumReservesLimit (slippage protection)
+        // If sumReservesLimit is 0, no limit is applied
+        // Otherwise, it must be a valid limit based on swap direction
+        if (sumReservesLimit != 0) {
+            if (
+                lte
+                    ? sumReservesLimit > uint128(state.sumReserves) // moving toward equal-price, S decreases
+                    : sumReservesLimit < uint128(state.sumReserves) // moving away, S increases
+            ) revert InvalidSumReservesLimit();
+        }
+
         // Fill the order by iterating through ticks
-        while (state.amountSpecifiedRemaining > 0) {
+        // Stop if: amount filled OR sumReserves hits limit (slippage protection)
+        while (
+            state.amountSpecifiedRemaining > 0 &&
+            (sumReservesLimit == 0 || uint128(state.sumReserves) != sumReservesLimit)
+        ) {
             StepState memory step;
 
             step.sumReservesStart = state.sumReserves;
 
-            // Find next initialized tick
-            (step.nextTick, ) = tickBitmap.nextInitializedTickWithinOneWord(
+            // Find next initialized tick (save initialized flag for gas optimization)
+            (step.nextTick, step.initialized) = tickBitmap.nextInitializedTickWithinOneWord(
                 state.tick,
                 lte
             );
 
-            // TODO: Calculate sumReservesTarget from step.nextTick
-            // For now, use max value (no tick boundary in this milestone)
-            uint256 sumReservesTarget = type(uint128).max;
+            // Calculate sumReservesTarget from step.nextTick
+            uint256 sumReservesTarget = OrbitalMath.calcSumReservesAtTick(
+                step.nextTick,
+                state.r,
+                tokens.length
+            );
 
-            // Compute swap step using Orbital torus invariant (Newton's method)
+            // Cap target at sumReservesLimit if more restrictive than tick boundary
+            // (mirrors Uniswap V3's sqrtPriceLimitX96 capping in computeSwapStep)
             (step.sumReservesNext, step.amountIn, step.amountOut) = OrbitalMath.computeSwapStep(
                 tokens.length,
                 state.sumReserves,
-                sumReservesTarget,
-                r,
+                (
+                    lte
+                        ? sumReservesTarget < sumReservesLimit
+                        : sumReservesTarget > sumReservesLimit
+                )
+                    ? sumReservesLimit
+                    : sumReservesTarget,
+                state.r,
                 sumSquaredReserves_,
                 balances[tokenInIndex],
                 balances[tokenOutIndex],
@@ -236,11 +276,40 @@ contract ZorbitalPool {
             balances[tokenInIndex] += step.amountIn;
             balances[tokenOutIndex] -= step.amountOut;
 
-            // Update sumReserves
+            // Update sumReserves and sumSquaredReserves for next iteration
+            sumSquaredReserves_ = sumSquaredReserves_
+                + 2 * step.amountIn * (balances[tokenInIndex] - step.amountIn) + step.amountIn * step.amountIn
+                - 2 * step.amountOut * (balances[tokenOutIndex] + step.amountOut) + step.amountOut * step.amountOut;
             state.sumReserves = step.sumReservesNext;
 
-            // TODO: Update tick based on new α (implement tick crossing in later milestone)
+            // Check if we reached a tick boundary (like Uniswap V3's sqrtPriceX96 == sqrtPriceNextX96)
+            if (state.sumReserves == sumReservesTarget) {
+                // We reached the tick boundary
+                if (step.initialized) {
+                    // Cross the tick: get radius (always positive in Orbital)
+                    uint128 rDelta = ticks.cross(step.nextTick);
+
+                    // In Orbital with nested ticks (from Orbital.md "Crossing Ticks"):
+                    // - lte (toward equal-price, α decreasing): add rDelta (tick becomes interior)
+                    // - !lte (away from equal-price, α increasing): subtract rDelta (tick becomes boundary)
+                    if (lte) {
+                        state.r = state.r + rDelta;
+                    } else {
+                        state.r = state.r - rDelta;
+                    }
+
+                    if (state.r == 0) revert NotEnoughLiquidity();
+                }
+
+                // Update tick: step past the boundary
+                state.tick = lte ? step.nextTick - 1 : step.nextTick;
+            } else {
+                // Stayed within range, no tick update needed
+            }
         }
+
+        // Update global r if it changed (gas optimization: only write if different)
+        if (r_ != state.r) r = state.r;
 
         // Update slot0 only if state changed (gas optimization)
         if (state.tick != slot0_.tick) {
@@ -279,5 +348,40 @@ contract ZorbitalPool {
             r,
             slot0.tick
         );
+    }
+
+    event Flash(address indexed sender, uint256[] amounts);
+
+    error FlashLoanNotRepaid();
+
+    /// @notice Flash loan: borrow tokens and repay in same transaction
+    /// @param amounts Array of amounts to borrow for each token
+    /// @param data Arbitrary data passed to callback
+    function flash(
+        uint256[] calldata amounts,
+        bytes calldata data
+    ) public {
+        // Record balances before
+        uint256[] memory balancesBefore = new uint256[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            balancesBefore[i] = balance(i);
+        }
+
+        // Transfer requested amounts to caller
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (amounts[i] > 0) {
+                IERC20(tokens[i]).transfer(msg.sender, amounts[i]);
+            }
+        }
+
+        // Call the callback - caller must repay here
+        IZorbitalFlashCallback(msg.sender).zorbitalFlashCallback(data);
+
+        // Verify balances haven't decreased
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (balance(i) < balancesBefore[i]) revert FlashLoanNotRepaid();
+        }
+
+        emit Flash(msg.sender, amounts);
     }
 }

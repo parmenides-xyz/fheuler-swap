@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import "./ZorbitalPool.sol";
+import "./libraries/OrbitalMath.sol";
 import "./interfaces/IERC20.sol";
 
 contract ZorbitalManager {
@@ -10,30 +11,49 @@ contract ZorbitalManager {
         address payer;
     }
 
-    function mint(
-        address poolAddress,
-        int24 tick,
-        uint128 amount
-    ) public returns (uint256[] memory amounts) {
-        amounts = ZorbitalPool(poolAddress).mint(
+    struct MintParams {
+        address poolAddress;
+        int24 tick;
+        uint256[] amountsDesired; // Desired amounts for each token
+        uint256[] amountsMin;     // Minimum amounts for slippage protection
+    }
+
+    error SlippageCheckFailed(uint256[] amounts);
+
+    function mint(MintParams calldata params)
+        public
+        returns (uint256[] memory amounts)
+    {
+        // Calculate radius from desired amounts (like Uniswap V3's getLiquidityForAmounts)
+        uint128 radius = OrbitalMath.calcRadiusForAmounts(params.amountsDesired);
+
+        amounts = ZorbitalPool(params.poolAddress).mint(
             msg.sender,
-            tick,
-            amount,
-            abi.encode(CallbackData({pool: poolAddress, payer: msg.sender}))
+            params.tick,
+            radius,
+            abi.encode(CallbackData({pool: params.poolAddress, payer: msg.sender}))
         );
+
+        // Slippage check: ensure amounts are at least the minimums
+        for (uint256 i = 0; i < amounts.length; i++) {
+            if (amounts[i] < params.amountsMin[i])
+                revert SlippageCheckFailed(amounts);
+        }
     }
 
     function swap(
         address poolAddress,
         uint256 tokenInIndex,
         uint256 tokenOutIndex,
-        uint256 amountSpecified
+        uint256 amountSpecified,
+        uint128 sumReservesLimit
     ) public returns (int256 amountIn, int256 amountOut) {
         (amountIn, amountOut) = ZorbitalPool(poolAddress).swap(
             msg.sender,
             tokenInIndex,
             tokenOutIndex,
             amountSpecified,
+            sumReservesLimit,
             abi.encode(CallbackData({pool: poolAddress, payer: msg.sender}))
         );
     }

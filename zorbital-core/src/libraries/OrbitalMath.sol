@@ -10,6 +10,9 @@ library OrbitalMath {
 
     uint256 internal constant WAD = 1e18;
 
+    /// @notice Base for tick calculations: 1.0001 in WAD
+    uint256 internal constant TICK_BASE = 1000100000000000000;
+
     /// @notice Calculates the amount of each token needed when minting at equal-price point
     /// @dev amount_i = rDelta * (1 - 1/√n) for each token
     /// @param rDelta The radius being added
@@ -44,6 +47,49 @@ library OrbitalMath {
         reserve = calcAmountPerToken(radius, n);
     }
 
+    /// @notice Calculates radius from a single token amount (inverse of calcAmountPerToken)
+    /// @dev r = amount / (1 - 1/√n)
+    /// @param amount The token amount
+    /// @param n The number of tokens in the pool
+    /// @return radius The radius that corresponds to this amount
+    function calcRadiusForAmount(
+        uint256 amount,
+        uint256 n
+    ) internal pure returns (uint128 radius) {
+        // sqrtN = √n (in WAD)
+        uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
+
+        // invSqrtN = 1/√n = WAD/sqrtN (in WAD)
+        uint256 invSqrtN = WAD.mulDivDown(WAD, sqrtN);
+
+        // factor = (1 - 1/√n) in WAD
+        uint256 factor = WAD - invSqrtN;
+
+        // radius = amount / factor = amount * WAD / factor
+        radius = uint128(amount.mulDivDown(WAD, factor));
+    }
+
+    /// @notice Calculates radius from multiple token amounts (picks minimum)
+    /// @dev Like Uniswap V3's getLiquidityForAmounts, picks the limiting factor
+    /// @param amounts Array of token amounts
+    /// @return radius The maximum radius that can be provided with these amounts
+    function calcRadiusForAmounts(
+        uint256[] memory amounts
+    ) internal pure returns (uint128 radius) {
+        require(amounts.length > 0, "Empty amounts");
+
+        // Find minimum amount (the limiting factor)
+        uint256 minAmount = amounts[0];
+        for (uint256 i = 1; i < amounts.length; i++) {
+            if (amounts[i] < minAmount) {
+                minAmount = amounts[i];
+            }
+        }
+
+        // Calculate radius from minimum amount
+        radius = calcRadiusForAmount(minAmount, amounts.length);
+    }
+
     /// @notice Calculates the projection α = (1/√n) * Σxᵢ
     /// @dev α is the component of reserves parallel to v⃗ = (1/√n)(1,1,...,1)
     /// @param sumReserves The sum of all reserves (Σxᵢ)
@@ -55,6 +101,135 @@ library OrbitalMath {
     ) internal pure returns (uint256 alpha) {
         uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
         alpha = sumReserves.mulDivDown(WAD, sqrtN);
+    }
+
+    /// @notice Calculates the normalized boundary k^norm = 1.0001^tick
+    /// @param tick The tick index (>= 0)
+    /// @return kNorm The normalized boundary value (in WAD)
+    function tickToKNorm(int24 tick) internal pure returns (uint256 kNorm) {
+        kNorm = WAD;
+        uint256 base = TICK_BASE;
+        uint24 t = uint24(tick);
+        while (t > 0) {
+            if (t & 1 != 0) {
+                kNorm = kNorm.mulWadDown(base);
+            }
+            base = base.mulWadDown(base);
+            t >>= 1;
+        }
+    }
+
+    /// @notice Calculates the sum of reserves S at which α^norm = k^norm
+    /// @dev At boundary: α/r = k^norm, so S = k^norm * r * √n
+    function calcSumReservesAtTick(
+        int24 tick,
+        uint256 radius,
+        uint256 n
+    ) internal pure returns (uint256 sumReserves) {
+        uint256 kNorm = tickToKNorm(tick);
+        uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
+        // S = k^norm * r * √n
+        sumReserves = kNorm.mulWadDown(radius).mulWadDown(sqrtN);
+    }
+
+    /// @notice Calculates input/output amounts to reach a target sumReserves
+    /// @dev Analogous to Uniswap V3's calcAmount0Delta - finds how much input
+    ///      is needed to move reserves to a specific boundary.
+    ///      Uses Newton's method with constraint: d - y = delta (target S' - current S)
+    function calcAmountToTarget(
+        uint256 n,
+        uint256 sumReservesCurrent,
+        uint256 sumReservesTarget,
+        uint256 radius,
+        uint256 sumSquaredReserves,
+        uint256 balanceIn,
+        uint256 balanceOut,
+        uint256 k,
+        uint256 s
+    ) internal pure returns (uint256 amountIn, uint256 amountOut) {
+        // delta = S' - S (how much sumReserves needs to change)
+        // d - y = delta, so d = delta + y
+        int256 delta = int256(sumReservesTarget) - int256(sumReservesCurrent);
+
+        uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
+        uint256 rSqrtN = radius * sqrtN / WAD;
+        uint256 rSquared = radius * radius;
+
+        // Newton iteration to find y (output amount)
+        // With d = delta + y, we solve for y such that invariant holds
+        uint256 y = balanceOut / 2; // Initial guess
+        uint256 prevY;
+
+        for (uint256 i = 0; i < 255; ++i) {
+            prevY = y;
+
+            // d = delta + y (could be negative if delta < 0 and y < |delta|)
+            int256 dSigned = delta + int256(y);
+            if (dSigned < 0) {
+                y = y / 2;
+                continue;
+            }
+            uint256 d = uint256(dSigned);
+
+            // S' = S + d - y = sumReservesTarget (by construction)
+            uint256 S = sumReservesTarget;
+            // Q' = Q + 2*d*balanceIn + d² - 2*y*balanceOut + y²
+            uint256 Q = sumSquaredReserves + 2 * d * balanceIn + d * d;
+            if (2 * y * balanceOut > Q + y * y) {
+                y = y / 2;
+                continue;
+            }
+            Q = Q - 2 * y * balanceOut + y * y;
+
+            // u = S/√n - k - r√n
+            uint256 alpha = S * WAD / sqrtN;
+            int256 u = int256(alpha) - int256(k) - int256(rSqrtN);
+
+            // ||w||² = (nQ - S²) / n
+            int256 nQ = int256(n * Q);
+            int256 S2 = int256(S) * int256(S);
+            int256 wSquaredSigned = (nQ - S2) / int256(n);
+            uint256 w = wSquaredSigned > 0 ? FixedPointMathLib.sqrt(uint256(wSquaredSigned)) : 0;
+
+            // f(y) = u² + (w - s)² - r²
+            int256 wMinusS = int256(w) - int256(s);
+            int256 fVal = u * u + wMinusS * wMinusS - int256(rSquared);
+
+            // f'(y) with d = delta + y: includes ∂d/∂y = 1
+            // f'(y) = 2u * (∂α/∂y) + 2(w-s) * (∂w/∂y)
+            // ∂S/∂y = ∂d/∂y - 1 = 0 (S is fixed at target)
+            // So ∂α/∂y = 0
+            // ∂Q/∂y = 2*balanceIn + 2*d - 2*balanceOut + 2*y = 2*(balanceIn + d - balanceOut + y)
+            // ∂w/∂y = (n * ∂Q/∂y) / (2*n*w) = ∂Q/∂y / (2*w)
+
+            if (w == 0) w = 1;
+            int256 dQdy = 2 * (int256(balanceIn) + int256(d) - int256(balanceOut) + int256(y));
+            int256 fPrime = 2 * wMinusS * dQdy / int256(2 * w);
+
+            if (fPrime == 0) break;
+
+            int256 step = fVal * int256(WAD) / fPrime;
+
+            if (step >= 0) {
+                y = uint256(step) > y ? 0 : y - uint256(step);
+            } else {
+                y = y + uint256(-step);
+            }
+
+            if (y > balanceOut) y = balanceOut;
+
+            unchecked {
+                if (y > prevY) {
+                    if (y - prevY <= 1) break;
+                } else if (prevY - y <= 1) {
+                    break;
+                }
+            }
+        }
+
+        amountOut = y;
+        // d = delta + y, but ensure non-negative
+        amountIn = delta >= 0 ? uint256(delta) + y : (y > uint256(-delta) ? y - uint256(-delta) : 0);
     }
 
     /// @notice The swap calculation didn't converge

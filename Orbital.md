@@ -472,4 +472,50 @@ The *normalized boundary* is $k^{\text{norm}} = \frac{k}{r}$
 
 Note that if $\alpha^{\text{norm}} = k^{\text{norm}}$ for a given tick, we can multiply both sides by $r$ to remove the normalization and see that the tick is at its boundary.
 
-Suppose that for a given tick we have $\alpha^{\text{norm}} < k^{\text{norm}}$, so that it is an interior tick. By no-arbitrage, its reserve vector $\vec{x}$ will be parallel to the r
+Suppose that for a given tick we have $\alpha^{\text{norm}} < k^{\text{norm}}$, so that it is an interior tick. By no-arbitrage, its reserve vector $\vec{x}$ will be parallel to the reserve vectors of all other interior ticks, and so its normalized reserve vector $\vec{x}^{\text{norm}}$ will be precisely equal to the normalized reserve vector of all interior ticks, which we will call $\vec{x}_{\text{int}}^{\text{norm}}$.
+
+$$\alpha_{\text{int}}^{\text{norm}} = \vec{x}_{\text{int}}^{\text{norm}} \cdot \vec{v}$$
+
+A given tick $i$ is interior if and only if $k_i^{\text{norm}} > \alpha_{\text{int}}^{\text{norm}}$. To see why, first assume $i$ is interior. Then by definition $k_i^{\text{norm}} > \alpha_i^{\text{norm}} = \alpha_{\text{int}}^{\text{norm}}$. For the other direction, assume $k_i^{\text{norm}} > \alpha_{\text{int}}^{\text{norm}}$. Then if this tick were to have the same normalized position as an interior tick, it would not hit its plane constraint, implying that by no-arbitrage it must in fact have this normalized position, making it an interior tick.
+
+## Trade Segmentation Process
+
+At any given time, the AMM's location in tick space is demarcated by $k_{\text{int}}^{\min}$, the minimum normalized $k$ of a currently interior tick, which will be the next tick to become trapped at its boundary if the overall reserves continue to move away from the equal price point. Similarly, $k_{\text{bound}}^{\max}$ is the maximum normalized $k$ of a currently boundary tick, which will be the first tick to become interior again as AMM reserves return to the equal price point.
+
+Let's say we are trying to compute a trade $\vec{\Delta}_{\text{total}}$ where the user putting in some quantity $d_i^{\text{total}}$ of asset $X_i$ to remove some of asset $X_j$. The steps to segment the trade are as follows:
+
+**Calculate Assuming No Tick Boundary Crossing:** Assume all currently interior ticks stay interior and all currently boundary ticks stay boundary and compute the potential final AMM state $\vec{x}_{\text{potential}}$ and the corresponding interior tick normalized projection $\alpha_{\text{int}}^{\text{norm}}$ using the global trade invariant method above.
+
+**Boundary Crossing Check:** If our assumptions were correct and no ticks changed from interior to boundary or vice versa, then we will have $k_{\text{bound}}^{\max} \leq \alpha_{\text{int}}^{\text{norm}} \leq k_{\text{int}}^{\min}$ — i.e. our new interior tick point separates all the interior tick boundaries from all the boundary tick boundaries.
+
+If that's the case, we're done. Otherwise, we need to segment the trade.
+
+**Segmentation (If Crossing Detected)**
+
+We know the normalized boundary being crossed from the prior step, which we'll call $k_{\text{cross}}^{\text{norm}}$. This crossover is going to occur when $\alpha_{\text{int}}^{\text{norm}} = k_{\text{cross}}^{\text{norm}} \Rightarrow \alpha_{\text{int}} = r_{\text{int}} k_{\text{cross}}^{\text{norm}}$.
+
+So then at the crossover point, we have
+
+$$\alpha_{\text{crossover}} = \vec{x} \cdot \vec{v} = \vec{x}_{\text{int}} \cdot \vec{v} + \vec{x}_{\text{bound}} \cdot \vec{v} = \alpha_{\text{int}} + k_{\text{bound}}^{\text{total}} = r_{\text{int}} k_{\text{crossover}}^{\text{norm}} + x_{\text{bound}}^{\text{total}}$$
+
+where $k_{\text{bound}}^{\text{total}}$ is the sum of the $k$ values of all currently boundary ticks.
+
+**Find Intersection Trade $\vec{\Delta}_{\text{crossover}}$**
+
+We want to find the trade
+
+$$\vec{\Delta}_{\text{crossover}} = (0, \ldots, d_i^{\text{crossover}}, 0, \ldots, -d_j^{\text{crossover}}, 0, \ldots)$$
+
+between $i$ and $j$ that respects the global invariant while taking us precisely to the crossover point $\vec{x}_{\text{crossover}} = \vec{x} + \vec{\Delta}_{\text{crossover}}$ where we have
+
+$$\alpha_{\text{crossover}} = \vec{x}_{\text{crossover}} \cdot \vec{v} = (\vec{x} + \vec{\Delta}_{\text{crossover}}) \cdot \vec{v} = \alpha_{\text{total}} + \vec{\Delta}_{\text{crossover}} \cdot \vec{v}$$
+
+$$= \alpha_{\text{total}} + \frac{1}{\sqrt{n}}\left(d_i^{\text{crossover}} - d_j^{\text{crossover}}\right)$$
+
+so that we see
+
+$$d_j^{\text{crossover}} = \sqrt{n}(\alpha_{\text{total}} - \alpha_{\text{crossover}}) + d_i^{\text{crossover}}$$
+
+Substituting that in to the global invariant formula from above yields a quadratic equation in $d_i^{\text{crossover}}$ which we can simply solve using the quadratic formula.
+
+Once we find the crossover point, we can execute the trade up to there, adjust the crossed tick from interior to boundary or vice versa, and proceed with the rest of the trade, re-segmenting if necessary.
