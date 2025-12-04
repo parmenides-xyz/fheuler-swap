@@ -100,7 +100,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty, mint will add tokens
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
@@ -133,9 +133,10 @@ contract ZorbitalPoolTest is Test {
         assertEq(tickRGross, params.radius, "incorrect tick rGross");
         assertEq(tickRNet, params.radius, "incorrect tick rNet");
 
-        // Check slot0 and r
+        // Check slot0 and r - sumReserves should equal actual deposited amount
+        // 4 tokens × 500e18 = 2000e18
         (uint128 sumReserves, int24 tick, bool initialized) = pool.slot0();
-        assertEq(sumReserves, params.currentSumReserves, "invalid sumReserves");
+        assertEq(sumReserves, 4 * expectedAmount, "invalid sumReserves");
         assertEq(tick, params.currentTick, "invalid current tick");
         assertTrue(initialized, "pool not initialized");
         assertEq(pool.r(), params.radius, "invalid current radius");
@@ -150,7 +151,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty, mint will add tokens
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
@@ -343,7 +344,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
@@ -395,7 +396,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
@@ -442,7 +443,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty
             shouldTransferInCallback: true,
             mintLiquidity: true
         });
@@ -475,7 +476,7 @@ contract ZorbitalPoolTest is Test {
             currentTick: 0,
             tick: 2000,
             radius: 1000e18,
-            currentSumReserves: 4000e18,
+            currentSumReserves: 0,  // Pool starts empty
             shouldTransferInCallback: true,
             mintLiquidity: true
         });

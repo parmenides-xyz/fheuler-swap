@@ -68,16 +68,22 @@ contract ZorbitalPool {
     error AlreadyInitialized();
 
     /// @notice Initialize pool with starting state
-    /// @param sumReserves Initial sum of reserves
+    /// @param initialSumReserves Initial sum of reserves
     /// @param tick Initial tick
-    function initialize(uint128 sumReserves, int24 tick) public {
+    /// @dev Assumes pool starts at equal-price point (all balances equal)
+    ///      so Q = n * (S/n)² = S²/n
+    function initialize(uint128 initialSumReserves, int24 tick) public {
         if (slot0.initialized) revert AlreadyInitialized();
 
         slot0 = Slot0({
-            sumReserves: sumReserves,
+            sumReserves: initialSumReserves,
             tick: tick,
             initialized: true
         });
+
+        uint256 n = tokens.length;
+        uint256 S = initialSumReserves;
+        sumSquaredReserves = (S * S) / n;
     }
 
     error InvalidTickRange();
@@ -211,6 +217,12 @@ contract ZorbitalPool {
                 revert InsufficientInputAmount();
         }
 
+        uint256 a = amounts[0];  // All amounts equal in Orbital
+        uint256 n = tokens.length;
+        uint256 oldS = slot0.sumReserves;
+        slot0.sumReserves = uint128(oldS + n * a);
+        sumSquaredReserves = sumSquaredReserves + 2 * a * oldS + n * a * a;
+
         emit Mint(msg.sender, owner, tick, amount, amounts);
     }
 
@@ -265,6 +277,11 @@ contract ZorbitalPool {
             for (uint256 i = 0; i < tokens.length; i++) {
                 IERC20(tokens[i]).transfer(recipient, amountPerToken);
             }
+
+            uint256 n = tokens.length;
+            uint256 oldS = slot0.sumReserves;
+            slot0.sumReserves = uint128(oldS - n * amountPerToken);
+            sumSquaredReserves = sumSquaredReserves + n * amountPerToken * amountPerToken - 2 * amountPerToken * oldS;
         }
 
         emit Collect(msg.sender, recipient, tick, amount);
@@ -302,19 +319,15 @@ contract ZorbitalPool {
         Slot0 memory slot0_ = slot0;
         uint128 r_ = r;
 
-        uint256[] memory balances = new uint256[](tokens.length);
-        uint256 sumReserves_ = 0;
-        uint256 sumSquaredReserves_ = 0;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            balances[i] = balance(i);
-            sumReserves_ += balances[i];
-            sumSquaredReserves_ += balances[i] * balances[i];
-        }
+        uint256 balanceIn = balance(tokenInIndex);
+        uint256 balanceOut = balance(tokenOutIndex);
+
+        uint256 sumSquaredReserves_ = sumSquaredReserves;
 
         SwapState memory state = SwapState({
             amountSpecifiedRemaining: amountSpecified,
             amountCalculated: 0,
-            sumReserves: sumReserves_,
+            sumReserves: slot0_.sumReserves,
             tick: slot0_.tick,
             r: r_,
             kBound: kBound,
@@ -322,7 +335,7 @@ contract ZorbitalPool {
             feeGrowthGlobalX128: feeGrowthGlobalX128
         });
 
-        bool lte = balances[tokenInIndex] < balances[tokenOutIndex];
+        bool lte = balanceIn < balanceOut;
 
         if (sumReservesLimit != 0) {
             if (
@@ -365,8 +378,8 @@ contract ZorbitalPool {
                     : sumReservesTarget,
                 state.r,
                 sumSquaredReserves_,
-                balances[tokenInIndex],
-                balances[tokenOutIndex],
+                balanceIn,
+                balanceOut,
                 amountRemainingLessFee,
                 state.kBound,
                 state.sBound
@@ -386,12 +399,12 @@ contract ZorbitalPool {
             state.amountSpecifiedRemaining -= (step.amountIn + step.feeAmount);
             state.amountCalculated += step.amountOut;
 
-            balances[tokenInIndex] += step.amountIn;
-            balances[tokenOutIndex] -= step.amountOut;
-
             sumSquaredReserves_ = sumSquaredReserves_
-                + 2 * step.amountIn * (balances[tokenInIndex] - step.amountIn) + step.amountIn * step.amountIn
-                - 2 * step.amountOut * (balances[tokenOutIndex] + step.amountOut) + step.amountOut * step.amountOut;
+                + 2 * step.amountIn * balanceIn + step.amountIn * step.amountIn
+                - 2 * step.amountOut * balanceOut + step.amountOut * step.amountOut;
+
+            balanceIn += step.amountIn;
+            balanceOut -= step.amountOut;
             state.sumReserves = step.sumReservesNext;
 
             if (state.sumReserves == sumReservesTarget) {
@@ -425,6 +438,8 @@ contract ZorbitalPool {
 
         kBound = state.kBound;
         sBound = state.sBound;
+
+        sumSquaredReserves = sumSquaredReserves_;
 
         feeGrowthGlobalX128 = state.feeGrowthGlobalX128;
 
