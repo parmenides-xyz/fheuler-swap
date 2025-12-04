@@ -192,7 +192,7 @@ contract ZorbitalPool {
     ) external returns (uint256[] memory amounts) {
         if (amount == 0) revert ZeroRadius();
 
-        (Position.Info storage position, int256[] memory amountsInt) = _modifyPosition(
+        (, int256[] memory amountsInt) = _modifyPosition(
             ModifyPositionParams({
                 owner: owner,
                 tick: tick,

@@ -142,7 +142,7 @@ contract ZorbitalManager {
         uint256 tokenOutIndex = findTokenIndex(orbitalPool, tokenOut);
 
         // Execute swap
-        (int256 amountInResult, int256 amountOutResult) = orbitalPool.swap(
+        (, int256 amountOutResult) = orbitalPool.swap(
             recipient,
             tokenInIndex,
             tokenOutIndex,
@@ -183,7 +183,7 @@ contract ZorbitalManager {
     }
 
     function zorbitalSwapCallback(
-        uint256 tokenInIndex,
+        uint256 /* tokenInIndex */,
         uint256 /* tokenOutIndex */,
         int256 amountIn,
         int256 /* amountOut */,

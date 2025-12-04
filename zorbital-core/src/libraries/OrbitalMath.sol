@@ -56,16 +56,9 @@ library OrbitalMath {
         uint256 amount,
         uint256 n
     ) internal pure returns (uint128 radius) {
-        // sqrtN = √n (in WAD)
         uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
-
-        // invSqrtN = 1/√n = WAD/sqrtN (in WAD)
         uint256 invSqrtN = WAD.mulDivDown(WAD, sqrtN);
-
-        // factor = (1 - 1/√n) in WAD
         uint256 factor = WAD - invSqrtN;
-
-        // radius = amount / factor = amount * WAD / factor
         radius = uint128(amount.mulDivDown(WAD, factor));
     }
 
@@ -77,16 +70,12 @@ library OrbitalMath {
         uint256[] memory amounts
     ) internal pure returns (uint128 radius) {
         require(amounts.length > 0, "Empty amounts");
-
-        // Find minimum amount (the limiting factor)
         uint256 minAmount = amounts[0];
         for (uint256 i = 1; i < amounts.length; i++) {
             if (amounts[i] < minAmount) {
                 minAmount = amounts[i];
             }
         }
-
-        // Calculate radius from minimum amount
         radius = calcRadiusForAmount(minAmount, amounts.length);
     }
 
@@ -148,7 +137,6 @@ library OrbitalMath {
     }
 
     /// @notice Calculates the sum of reserves S at which α^norm = k^norm
-    /// @dev At boundary: α/r = k^norm, so S = k^norm * r * √n
     function calcSumReservesAtTick(
         int24 tick,
         uint256 radius,
@@ -156,7 +144,6 @@ library OrbitalMath {
     ) internal pure returns (uint256 sumReserves) {
         uint256 kNorm = tickToKNorm(tick);
         uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
-        // S = k^norm * r * √n
         sumReserves = kNorm.mulWadDown(radius).mulWadDown(sqrtN);
     }
 
@@ -178,9 +165,6 @@ library OrbitalMath {
 
         uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
         uint256 rSqrtN = radius.mulWadDown(sqrtN);  // r√n
-
-        // s² = r² - (k - r√n)²
-        // Now both k and rSqrtN are in the same units (token units)
         uint256 diff = k > rSqrtN ? k - rSqrtN : rSqrtN - k;
         uint256 diffSquared = diff.mulWadDown(diff);
         uint256 rSquared = radius.mulWadDown(radius);
@@ -189,14 +173,12 @@ library OrbitalMath {
             uint256 sSquared = rSquared - diffSquared;
             s = FixedPointMathLib.sqrt(sSquared * WAD);
         } else {
-            s = 0; // At or beyond the boundary limit
+            s = 0;
         }
     }
 
     /// @notice Calculates input/output amounts to reach a target sumReserves
-    /// @dev Analogous to Uniswap V3's calcAmount0Delta - finds how much input
-    ///      is needed to move reserves to a specific boundary.
-    ///      Uses Newton's method with constraint: d - y = delta (target S' - current S)
+    /// @dev Analogous to Uniswap V3's calcAmount0Delta - uses Newton's method
     function calcAmountToTarget(
         uint256 n,
         uint256 sumReservesCurrent,
@@ -208,8 +190,6 @@ library OrbitalMath {
         uint256 k,
         uint256 s
     ) internal pure returns (uint256 amountIn, uint256 amountOut) {
-        // delta = S' - S (how much sumReserves needs to change)
-        // d - y = delta, so d = delta + y
         int256 delta = int256(sumReservesTarget) - int256(sumReservesCurrent);
 
         uint256 sqrtN = FixedPointMathLib.sqrt(n * WAD * WAD);
@@ -218,23 +198,18 @@ library OrbitalMath {
 
         // Newton iteration to find y (output amount)
         // With d = delta + y, we solve for y such that invariant holds
-        uint256 y = balanceOut / 2; // Initial guess
+        uint256 y = balanceOut / 2;
         uint256 prevY;
 
         for (uint256 i = 0; i < 255; ++i) {
             prevY = y;
-
-            // d = delta + y (could be negative if delta < 0 and y < |delta|)
             int256 dSigned = delta + int256(y);
             if (dSigned < 0) {
                 y = y / 2;
                 continue;
             }
             uint256 d = uint256(dSigned);
-
-            // S' = S + d - y = sumReservesTarget (by construction)
             uint256 S = sumReservesTarget;
-            // Q' = Q + 2*d*balanceIn + d² - 2*y*balanceOut + y²
             uint256 Q = sumSquaredReserves + 2 * d * balanceIn + d * d;
             if (2 * y * balanceOut > Q + y * y) {
                 y = y / 2;
@@ -242,26 +217,16 @@ library OrbitalMath {
             }
             Q = Q - 2 * y * balanceOut + y * y;
 
-            // u = S/√n - k - r√n
             uint256 alpha = S * WAD / sqrtN;
             int256 u = int256(alpha) - int256(k) - int256(rSqrtN);
 
-            // ||w||² = (nQ - S²) / n
             int256 nQ = int256(n * Q);
             int256 S2 = int256(S) * int256(S);
             int256 wSquaredSigned = (nQ - S2) / int256(n);
             uint256 w = wSquaredSigned > 0 ? FixedPointMathLib.sqrt(uint256(wSquaredSigned)) : 0;
 
-            // f(y) = u² + (w - s)² - r²
             int256 wMinusS = int256(w) - int256(s);
             int256 fVal = u * u + wMinusS * wMinusS - int256(rSquared);
-
-            // f'(y) with d = delta + y: includes ∂d/∂y = 1
-            // f'(y) = 2u * (∂α/∂y) + 2(w-s) * (∂w/∂y)
-            // ∂S/∂y = ∂d/∂y - 1 = 0 (S is fixed at target)
-            // So ∂α/∂y = 0
-            // ∂Q/∂y = 2*balanceIn + 2*d - 2*balanceOut + 2*y = 2*(balanceIn + d - balanceOut + y)
-            // ∂w/∂y = (n * ∂Q/∂y) / (2*n*w) = ∂Q/∂y / (2*w)
 
             if (w == 0) w = WAD; // Use 1e18 to maintain scaling
             int256 dQdy = 2 * (int256(balanceIn) + int256(d) - int256(balanceOut) + int256(y));
@@ -269,8 +234,6 @@ library OrbitalMath {
 
             if (fPrime == 0) break;
 
-            // Newton step: y_new = y - f(y) / f'(y)
-            // fVal has units e36, fPrime has units e18, so step = e36/e18 = e18 ✓
             int256 step = fVal / fPrime;
 
             if (step >= 0) {
@@ -335,12 +298,9 @@ library OrbitalMath {
             uint256 amountOut
         )
     {
-        // After adding input: S' = S + d, Q' = Q + 2*d*balanceIn + d²
         uint256 sumAfterIn = sumReservesCurrent + amountRemaining;
         uint256 sumSqAfterIn = sumSquaredReserves + 2 * amountRemaining * balanceIn + amountRemaining * amountRemaining;
 
-        // Constants for Newton iteration (excluding the output token)
-        // A = S' - balanceOut, B = Q' - balanceOut²
         uint256 A = sumAfterIn - balanceOut;
         uint256 B = sumSqAfterIn - balanceOut * balanceOut;
 
@@ -348,8 +308,6 @@ library OrbitalMath {
         uint256 rSqrtN = radius * sqrtN / WAD;
         uint256 rSquared = radius * radius;
 
-        // Newton iteration to find new output balance (y)
-        // Initial guess: for stablecoins, output ≈ input
         uint256 y = balanceOut > amountRemaining ? balanceOut - amountRemaining : balanceOut / 2;
         uint256 prevY;
 
@@ -360,24 +318,18 @@ library OrbitalMath {
             uint256 S = A + y;
             uint256 Q = B + y * y;
 
-            // u = S/√n - k - r√n
             uint256 alpha = S * WAD / sqrtN;
             int256 u = int256(alpha) - int256(k) - int256(rSqrtN);
 
-            // ||w||² = Q - S²/n = (nQ - S²) / n
-            // During iteration, nQ - S² might be negative; use signed math
             int256 nQ = int256(n * Q);
             int256 S2 = int256(S) * int256(S);
             int256 wSquaredSigned = (nQ - S2) / int256(n);
 
-            // w = sqrt(max(0, wSquared)) - if negative, we're outside valid region
             uint256 w = wSquaredSigned > 0 ? FixedPointMathLib.sqrt(uint256(wSquaredSigned)) : 0;
 
-            // f(y) = u² + (w - s)² - r²
             int256 wMinusS = int256(w) - int256(s);
             int256 fVal = u * u + wMinusS * wMinusS - int256(rSquared);
 
-            // f'(y) = 2u/√n + 2(w-s) * ((n-1)y - A) / (nw)
             int256 dudy = int256(WAD * WAD / sqrtN);
             int256 dwdy_numer = int256(n - 1) * int256(y) - int256(A);
 
@@ -389,11 +341,8 @@ library OrbitalMath {
 
             if (fPrime == 0) break;
 
-            // Newton step: y_new = y - f(y) / f'(y)
-            // fVal has units e36, fPrime has units e18, so step = e36/e18 = e18 ✓
             int256 step = fVal / fPrime;
 
-            // Dampen step to prevent overshooting (max 50% change per iteration)
             uint256 maxStep = y / 2;
             if (step >= 0) {
                 uint256 absStep = uint256(step);
@@ -405,8 +354,6 @@ library OrbitalMath {
                 y = y + absStep;
             }
 
-            // Bound y to prevent underflow in amountOut calculation
-            // y must be <= balanceOut (we're removing tokens, not adding)
             if (y > balanceOut) {
                 y = balanceOut;
             }
@@ -421,20 +368,16 @@ library OrbitalMath {
             }
         }
 
-        // Compute output and new sum of reserves
         amountOut = balanceOut - y;
         sumReservesNext = sumReservesCurrent + amountRemaining - amountOut;
         amountIn = amountRemaining;
 
-        // Check if we crossed the tick boundary
         bool increasing = sumReservesCurrent <= sumReservesTarget;
         bool crossesBoundary = increasing
             ? sumReservesNext > sumReservesTarget
             : sumReservesNext < sumReservesTarget;
 
         if (crossesBoundary) {
-            // Cap at target boundary and recalculate amounts to match
-            // Use calcAmountToTarget to get exact amounts to reach boundary
             (amountIn, amountOut) = calcAmountToTarget(
                 n,
                 sumReservesCurrent,
