@@ -1,6 +1,6 @@
 # zOrbital
 
-Privacy-preserving, *n*-dimensional AMM + x402 with encrypted swaps using Fully Homomorphic Encryption.
+Privacy-preserving, *n*-dimensional AMM + autonomous compute rental with encrypted swaps + x402.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ There’s just one problem: every payment is public + USDC-opinionated.
 
 ## Solution
 
-zOrbital reimagines Paradigm's [Orbital](https://www.paradigm.xyz/2025/06/orbital) with Fully Homomorphic Encryption (FHE). Swap any stablecoin for USDC in one pool (a feature-rich implementation of Paradigm's design, now with opt-in FHE for confidential swaps), and pay for goods/services both publicly/privately. By leveraging Fhenix's FHE Coprocessor (recently live on Base!), the AMM computes valid swaps over ciphertext without ever decrypting the data.
+zOrbital reimagines Paradigm's [Orbital](https://www.paradigm.xyz/2025/06/orbital) with Fully Homomorphic Encryption (FHE). Swap any stablecoin for USDC in one pool (a feature-rich implementation of Paradigm's design (*n*-dimensional CLMM for any number of stablecoins), now with opt-in FHE for confidential swaps), and pay for goods/services both publicly/privately. By leveraging Fhenix's FHE Coprocessor (recently live on Base!), the AMM computes valid swaps over ciphertext without ever decrypting the data.
 
 Key properties:
 - **Encrypted reserves**: Pool state is never revealed
