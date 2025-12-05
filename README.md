@@ -1,6 +1,6 @@
 # zOrbital
 
-Privacy-preserving AMM with encrypted swaps using Fully Homomorphic Encryption.
+Privacy-preserving, *n*-dimensional AMM + x402 with encrypted swaps using Fully Homomorphic Encryption.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ There’s just one problem: every payment is public + USDC-opinionated.
 
 ## Solution
 
-zOrbital reimagines Paradigm's [Orbital]() with Fully Homomorphic Encryption (FHE). All swap amounts and pool reserves are encrypted on-chain. The AMM computes valid swaps over ciphertext without ever decrypting the data.
+zOrbital reimagines Paradigm's [Orbital](https://www.paradigm.xyz/2025/06/orbital) with Fully Homomorphic Encryption (FHE). Swap any stablecoin for USDC in one pool (a feature-rich implementation of Paradigm's design, now with opt-in FHE for confidential swaps), and pay for goods/services both publicly/privately. By leveraging Fhenix's FHE Coprocessor (recently live on Base!), the AMM computes valid swaps over ciphertext without ever decrypting the data.
 
 Key properties:
 - **Encrypted reserves**: Pool state is never revealed
@@ -81,6 +81,26 @@ Deployed on Base Sepolia:
 | Contracts | Solidity 0.8.25, Foundry |
 | L2 | Base Sepolia |
 | Deployment | Docker, Phala Cloud |
+
+## Deployed Contracts
+
+All contracts deployed on Base Sepolia.
+
+### Pools
+
+| Contract | Address |
+|----------|---------|
+| zOrbital (Private) | `0xa513B34e2375ab5dAF2C03FEB79953A8256b304E` |
+| Orbital (Public) | `0xe077aD60fa6487594514B014e5294B542E92a1c7` |
+| OrbitalManager | `0xf8753dE4d99a88FbcA0F5403838E01bCa5C11e78` |
+
+### FHERC20 Tokens
+
+| Token | Encrypted | Underlying |
+|-------|-----------|------------|
+| USDC | `0x0f3521fFe4246fA4285ea989155A7e4607C55f17` | `0x5E364C53fC867b060096bDc48A74401a6ED6b04a` |
+| USDT | `0x7943Eee6ABaD45A583E2aBEeA6Eb9CB18b4b6987` | `0xc04669a9c26341F62427b67B813E97426a8670C3` |
+| PYUSD | `0x79Ba1D402d4B6f6334A084A2637B38a89F74a7Bc` | `0x073285F3Fe2b388A0cf4c2f0DC9ad13197531Cbf` |
 
 ## Setup
 
