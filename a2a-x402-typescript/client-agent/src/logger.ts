@@ -1,7 +1,3 @@
-/**
- * Simple logger utility that respects CLIENT_DEBUG environment variable
- */
-
 const isDebugEnabled = process.env.CLIENT_DEBUG === 'true' || process.env.CLIENT_DEBUG === '1';
 
 export const logger = {

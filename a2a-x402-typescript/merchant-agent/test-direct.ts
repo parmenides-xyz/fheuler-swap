@@ -1,7 +1,3 @@
-/**
- * Direct test of the merchant agent without HTTP server
- */
-
 import { merchantAgent } from './agent';
 import { Session } from 'adk-typescript/sessions';
 import { InvocationContext } from 'adk-typescript/agents';

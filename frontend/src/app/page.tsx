@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import Image from "next/image";
 import { parseUnits, formatUnits } from "viem";
 import { Footer } from "../components/Footer";
 import { useCofhe } from "../hooks/useCofhe";
@@ -101,7 +100,7 @@ function WrapPanel() {
   const [amount, setAmount] = useState("");
   const [selectedToken, setSelectedToken] = useState(0);
   const [isUnwrap, setIsUnwrap] = useState(false);
-  const [txStatus, setTxStatus] = useState<string | null>(null);
+  const [_txStatus, setTxStatus] = useState<string | null>(null);
 
   const token = TOKENS[selectedToken];
   const wrapperAddress = token.address;
@@ -359,7 +358,7 @@ function SwapPanel() {
   };
 
   const handleSetOperator = async () => {
-    const until = BigInt(2 ** 48 - 1); // Max uint48
+    const until = 2 ** 48 - 1; // Max uint48
     writeContract({
       address: fromTokenInfo.address,
       abi: FHERC20_WRAPPER_ABI,
@@ -397,11 +396,17 @@ function SwapPanel() {
           return;
         }
 
+        const encryptedInput = {
+          ctHash: encrypted.data[0].ctHash,
+          securityZone: encrypted.data[0].securityZone,
+          utype: encrypted.data[0].utype,
+          signature: encrypted.data[0].signature as `0x${string}`,
+        };
         writeContract({
           address: ZORBITAL_POOL_ADDRESS,
           abi: ZORBITAL_ABI,
           functionName: "swap",
-          args: [BigInt(fromToken), BigInt(toToken), encrypted.data[0]],
+          args: [BigInt(fromToken), BigInt(toToken), encryptedInput],
         });
       } catch (err) {
         console.error("Swap failed:", err);
@@ -453,7 +458,7 @@ function SwapPanel() {
       <p className="text-white/60 text-sm mb-4">
         {isPrivate
           ? "Swap amounts encrypted on-chain with FHE."
-          : "Standard AMM swap with public amounts."}
+          : "n-D AMM swap with public amounts."}
       </p>
 
       {/* FHE Status for Private Mode */}
@@ -666,13 +671,19 @@ function TEEPanel() {
           return;
         }
 
-        console.log("Calling confidentialTransfer...", { to: TEE_PROVIDER_ADDRESS, data: encrypted.data[0] });
+        const encryptedInput = {
+          ctHash: encrypted.data[0].ctHash,
+          securityZone: encrypted.data[0].securityZone,
+          utype: encrypted.data[0].utype,
+          signature: encrypted.data[0].signature as `0x${string}`,
+        };
+        console.log("Calling confidentialTransfer...", { to: TEE_PROVIDER_ADDRESS, data: encryptedInput });
         // Use confidentialTransfer on eUSDC (FHERC20)
         writeContract({
           address: eUSDC,
           abi: FHERC20_WRAPPER_ABI,
           functionName: "confidentialTransfer",
-          args: [TEE_PROVIDER_ADDRESS, encrypted.data[0]],
+          args: [TEE_PROVIDER_ADDRESS, encryptedInput],
         });
       } else {
         console.log("Public payment...", { to: TEE_PROVIDER_ADDRESS, amount: PAYMENT_AMOUNT_PUBLIC.toString() });

@@ -1,7 +1,7 @@
 "use client";
 import { ReactNode } from "react";
 import { baseSepolia } from "wagmi/chains";
-import { createConfig, WagmiProvider, http } from "wagmi";
+import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider, getDefaultConfig, darkTheme } from "@rainbow-me/rainbowkit";
 import "@rainbow-me/rainbowkit/styles.css";

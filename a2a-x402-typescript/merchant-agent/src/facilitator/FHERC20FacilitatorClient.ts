@@ -1,8 +1,3 @@
-//
-// FHERC20 Facilitator Client - Handles fhe.confidential scheme payments
-//
-// Licensed under the Apache License, Version 2.0
-
 import { ethers } from 'ethers';
 import {
   FacilitatorClient,

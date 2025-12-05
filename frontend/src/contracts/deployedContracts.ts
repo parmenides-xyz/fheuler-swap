@@ -212,3 +212,7 @@ export const ORBITAL_MANAGER_ABI = [
     type: "function",
   },
 ] as const;
+
+// Legacy exports for FHECounter demo component (not used in zOrbital)
+export const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
+export const CONTRACT_ABI = [] as const;

@@ -1,3 +1,5 @@
+I attach here select technical excerpts from the original "Orbital" paper (in Markdown).
+
 # The Sphere AMM
 
 ## Formula

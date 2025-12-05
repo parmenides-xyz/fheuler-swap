@@ -1,0 +1,9 @@
+services:
+  zorbital-frontend:
+    image: parmenidesxyz/zorbital:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=${NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:-demo}
+    restart: unless-stopped

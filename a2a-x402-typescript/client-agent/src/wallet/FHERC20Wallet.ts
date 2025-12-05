@@ -1,8 +1,3 @@
-//
-// FHERC20Wallet - Private x402 payments using FHE-encrypted tokens
-//
-// Licensed under the Apache License, Version 2.0
-
 import { ethers } from 'ethers';
 import { cofhejs, Encryptable, FheTypes } from 'cofhejs/node';
 import { logger } from '../logger';
